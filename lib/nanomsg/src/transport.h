@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2012-2013 250bpm s.r.o.  All rights reserved.
+    Copyright (c) 2012-2014 250bpm s.r.o.  All rights reserved.
     Copyright (c) 2013 GoPivotal, Inc.  All rights reserved.
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -30,9 +30,9 @@
 
 #include "utils/list.h"
 #include "utils/msg.h"
+#include "utils/int.h"
 
 #include <stddef.h>
-#include <stdint.h>
 
 /*  This is the API between the nanomsg core and individual transports. */
 
@@ -108,6 +108,29 @@ void nn_epbase_getopt (struct nn_epbase *self, int level, int option,
     or 0 otherwise. */
 int nn_epbase_ispeer (struct nn_epbase *self, int socktype);
 
+/*  Notifies a monitoring system the error on this endpoint  */
+void nn_epbase_set_error(struct nn_epbase *self, int errnum);
+
+/*  Notifies a monitoring system that error is gone  */
+void nn_epbase_clear_error(struct nn_epbase *self);
+
+/*  Increments statistics counters in the socket structure  */
+void nn_epbase_stat_increment(struct nn_epbase *self, int name, int increment);
+
+
+#define NN_STAT_ESTABLISHED_CONNECTIONS 101
+#define NN_STAT_ACCEPTED_CONNECTIONS    102
+#define NN_STAT_DROPPED_CONNECTIONS     103
+#define NN_STAT_BROKEN_CONNECTIONS      104
+#define NN_STAT_CONNECT_ERRORS          105
+#define NN_STAT_BIND_ERRORS             106
+#define NN_STAT_ACCEPT_ERRORS           107
+
+#define NN_STAT_CURRENT_CONNECTIONS     201
+#define NN_STAT_INPROGRESS_CONNECTIONS  202
+#define NN_STAT_CURRENT_EP_ERRORS       203
+
+
 /******************************************************************************/
 /*  The base class for pipes.                                                 */
 /******************************************************************************/
@@ -142,6 +165,14 @@ struct nn_pipebase_vfptr {
     int (*recv) (struct nn_pipebase *self, struct nn_msg *msg);
 };
 
+/*  Endpoint specific options. Same restrictions as for nn_pipebase apply  */
+struct nn_ep_options
+{
+    int sndprio;
+    int rcvprio;
+    int ipv4only;
+};
+
 /*  The member of this structure are used internally by the core. Never use
     or modify them directly from the transport. */
 struct nn_pipebase {
@@ -154,6 +185,7 @@ struct nn_pipebase {
     void *data;
     struct nn_fsm_event in;
     struct nn_fsm_event out;
+    struct nn_ep_options options;
 };
 
 /*  Initialise the pipe.  */

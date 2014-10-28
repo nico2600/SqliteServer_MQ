@@ -1,5 +1,6 @@
 /*
-    Copyright (c) 2013 250bpm s.r.o.  All rights reserved.
+    Copyright (c) 2013-2014 250bpm s.r.o.  All rights reserved.
+    Copyright (c) 2013 GoPivotal, Inc.  All rights reserved.
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"),
@@ -25,16 +26,20 @@
 #include "../utils/err.h"
 #include "../utils/fast.h"
 #include "../utils/cont.h"
+#include "../utils/attr.h"
+#include "../utils/queue.h"
 
 /*  Private functions. */
 static void nn_worker_routine (void *arg);
 
-void nn_worker_fd_init (struct nn_worker_fd *self, struct nn_fsm *owner)
+void nn_worker_fd_init (struct nn_worker_fd *self, int src,
+    struct nn_fsm *owner)
 {
+    self->src = src;
     self->owner = owner;
 }
 
-void nn_worker_fd_term (struct nn_worker_fd *self)
+void nn_worker_fd_term (NN_UNUSED struct nn_worker_fd *self)
 {
 }
 
@@ -80,8 +85,10 @@ void nn_worker_rm_timer (struct nn_worker *self, struct nn_worker_timer *timer)
     nn_timerset_rm (&((struct nn_worker*) self)->timerset, &timer->hndl);
 }
 
-void nn_worker_task_init (struct nn_worker_task *self, struct nn_fsm *owner)
+void nn_worker_task_init (struct nn_worker_task *self, int src,
+    struct nn_fsm *owner)
 {
+    self->src = src;
     self->owner = owner;
     nn_queue_item_init (&self->item);
 }
@@ -139,6 +146,13 @@ void nn_worker_execute (struct nn_worker *self, struct nn_worker_task *task)
     nn_mutex_unlock (&self->sync);
 }
 
+void nn_worker_cancel (struct nn_worker *self, struct nn_worker_task *task)
+{
+    nn_mutex_lock (&self->sync);
+    nn_queue_remove (&self->tasks, &task->item);
+    nn_mutex_unlock (&self->sync);
+}
+
 static void nn_worker_routine (void *arg)
 {
     int rc;
@@ -171,7 +185,7 @@ static void nn_worker_routine (void *arg)
             errnum_assert (rc == 0, -rc);
             timer = nn_cont (thndl, struct nn_worker_timer, hndl);
             nn_ctx_enter (timer->owner->ctx);
-            timer->owner->fn (timer->owner, -1, NN_WORKER_TIMER_TIMEOUT, timer);
+            nn_fsm_feed (timer->owner, -1, NN_WORKER_TIMER_TIMEOUT, timer);
             nn_ctx_leave (timer->owner->ctx);
         }
 
@@ -214,7 +228,7 @@ static void nn_worker_routine (void *arg)
                         arrived in the worker thread. */
                     task = nn_cont (item, struct nn_worker_task, item);
                     nn_ctx_enter (task->owner->ctx);
-                    task->owner->fn (task->owner, -1,
+                    nn_fsm_feed (task->owner, task->src,
                         NN_WORKER_TASK_EXECUTE, task);
                     nn_ctx_leave (task->owner->ctx);
                 }
@@ -225,8 +239,9 @@ static void nn_worker_routine (void *arg)
             /*  It's a true I/O event. Invoke the handler. */
             fd = nn_cont (phndl, struct nn_worker_fd, hndl);
             nn_ctx_enter (fd->owner->ctx);
-            fd->owner->fn (fd->owner, -1, pevent, fd);
+            nn_fsm_feed (fd->owner, fd->src, pevent, fd);
             nn_ctx_leave (fd->owner->ctx);
         }
     }
 }
+

@@ -27,8 +27,6 @@ set (CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 
 set (NN_SOURCES
     nn.h
-    transport.h
-    protocol.h
     inproc.h
     ipc.h
     tcp.h
@@ -45,10 +43,10 @@ set (NN_SOURCES
     core/global.h
     core/global.c
     core/pipe.c
+    core/poll.c
     core/sock.h
     core/sock.c
     core/sockbase.c
-    core/device.c
     core/symbol.c
 
     aio/ctx.h
@@ -86,12 +84,15 @@ set (NN_SOURCES
     utils/alloc.c
     utils/atomic.h
     utils/atomic.c
+    utils/attr.h
     utils/chunk.h
     utils/chunk.c
     utils/chunkref.h
     utils/chunkref.c
     utils/clock.h
     utils/clock.c
+    utils/closefd.h
+    utils/closefd.c
     utils/cont.h
     utils/efd.h
     utils/efd.c
@@ -106,10 +107,12 @@ set (NN_SOURCES
     utils/err.h
     utils/err.c
     utils/fast.h
+    utils/fd.h
     utils/glock.h
     utils/glock.c
     utils/hash.h
     utils/hash.c
+    utils/int.h
     utils/list.h
     utils/list.c
     utils/msg.h
@@ -132,6 +135,9 @@ set (NN_SOURCES
     utils/thread_win.inc
     utils/wire.h
     utils/wire.c
+
+    devices/device.h
+    devices/device.c
 
     protocols/utils/dist.h
     protocols/utils/dist.c
@@ -169,11 +175,17 @@ set (NN_SOURCES
     protocols/pubsub/sub.c
     protocols/pubsub/trie.h
     protocols/pubsub/trie.c
+    protocols/pubsub/xpub.h
+    protocols/pubsub/xpub.c
+    protocols/pubsub/xsub.h
+    protocols/pubsub/xsub.c
 
     protocols/reqrep/req.h
     protocols/reqrep/req.c
     protocols/reqrep/rep.h
     protocols/reqrep/rep.c
+    protocols/reqrep/task.h
+    protocols/reqrep/task.c
     protocols/reqrep/xrep.h
     protocols/reqrep/xrep.c
     protocols/reqrep/xreq.h
@@ -241,39 +253,22 @@ set (NN_SOURCES
     transports/tcp/tcp.c
 )
 
-#  Here we cause symbols not to be exported from the library unless
-#  they are explicitly marked by NN_EXPORT specifier.
-#  Note: For MSVC there's no need for defining a special option. With MSVC
-#  symbols are not exported from the library unless explicitly said so.
-if (CMAKE_COMPILER_IS_GNUCC OR CMAKE_C_COMPILER MATCHES "/(icpc|icc)$")
-    add_definitions (-fvisibility=hidden)
+if (WIN32)
+    LIST (APPEND NN_SOURCES
+        utils/win.h
+    )
 endif ()
 
 add_library (nanomsg SHARED ${NN_SOURCES})
-set_target_properties (nanomsg PROPERTIES VERSION "${NN_VERSION_STR}")
 
 add_definitions (-DNN_EXPORTS)
+add_definitions (-DNN_USE_LITERAL_IFADDR)
 
-if (UNIX AND NOT NN_HAVE_OSX)
-    target_link_libraries (nanomsg rt)
-endif ()
+target_link_libraries (nanomsg ws2_32)
+target_link_libraries (nanomsg Mswsock.lib)
+target_link_libraries (nanomsg Advapi32.lib)
 
-if (NN_HAVE_WINDOWS)
-    target_link_libraries (nanomsg ws2_32)
-    target_link_libraries (nanomsg Mswsock.lib)
-    target_link_libraries (nanomsg Advapi32.lib)
-endif ()
-
-if (NN_HAVE_SOLARIS)
-    target_link_libraries (nanomsg socket)
-    target_link_libraries (nanomsg nsl)
-endif ()
-
-if (NN_HAVE_GETADDRINFO_A)
-    target_link_libraries (nanomsg anl)
-endif ()
-
-target_link_libraries (nanomsg ${CMAKE_THREAD_LIBS_INIT})
-
-install (TARGETS nanomsg DESTINATION lib)
-
+install(TARGETS nanomsg
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin)

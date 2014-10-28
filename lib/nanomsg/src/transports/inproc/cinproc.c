@@ -28,6 +28,7 @@
 #include "../../utils/err.h"
 #include "../../utils/cont.h"
 #include "../../utils/alloc.h"
+#include "../../utils/attr.h"
 
 #include <stddef.h>
 
@@ -51,6 +52,8 @@ static const struct nn_epbase_vfptr nn_cinproc_vfptr = {
 /*  Private functions. */
 static void nn_cinproc_handler (struct nn_fsm *self, int src, int type,
     void *srcptr);
+static void nn_cinproc_shutdown (struct nn_fsm *self, int src, int type,
+    void *srcptr);
 static void nn_cinproc_connect (struct nn_ins_item *self,
     struct nn_ins_item *peer);
 
@@ -62,7 +65,7 @@ int nn_cinproc_create (void *hint, struct nn_epbase **epbase)
     alloc_assert (self);
 
     nn_ins_item_init (&self->item, &nn_cinproc_vfptr, hint);
-    nn_fsm_init_root (&self->fsm, nn_cinproc_handler,
+    nn_fsm_init_root (&self->fsm, nn_cinproc_handler, nn_cinproc_shutdown,
         nn_epbase_getctx (&self->item.epbase));
     self->state = NN_CINPROC_STATE_IDLE;
     nn_sinproc_init (&self->sinproc, NN_CINPROC_SRC_SINPROC,
@@ -109,22 +112,18 @@ static void nn_cinproc_connect (struct nn_ins_item *self,
     cinproc = nn_cont (self, struct nn_cinproc, item);
     binproc = nn_cont (peer, struct nn_binproc, item);
 
-    nn_assert (cinproc->state == NN_CINPROC_STATE_DISCONNECTED);
+    nn_assert_state (cinproc, NN_CINPROC_STATE_DISCONNECTED);
     nn_sinproc_connect (&cinproc->sinproc, &binproc->fsm);
     nn_fsm_action (&cinproc->fsm, NN_CINPROC_ACTION_CONNECT);
 }
 
-static void nn_cinproc_handler (struct nn_fsm *self, int src, int type,
-    void *srcptr)
+static void nn_cinproc_shutdown (struct nn_fsm *self, int src, int type,
+    NN_UNUSED void *srcptr)
 {
     struct nn_cinproc *cinproc;
-    struct nn_sinproc *sinproc;
 
     cinproc = nn_cont (self, struct nn_cinproc, fsm);
 
-/******************************************************************************/
-/*  STOP procedure.                                                           */
-/******************************************************************************/
     if (nn_slow (src == NN_FSM_ACTION && type == NN_FSM_STOP)) {
 
         /*  First, unregister the endpoint from the global repository of inproc
@@ -144,6 +143,18 @@ static void nn_cinproc_handler (struct nn_fsm *self, int src, int type,
         return;
     }
 
+    nn_fsm_bad_state(cinproc->state, src, type);
+}
+
+static void nn_cinproc_handler (struct nn_fsm *self, int src, int type,
+    void *srcptr)
+{
+    struct nn_cinproc *cinproc;
+    struct nn_sinproc *sinproc;
+
+    cinproc = nn_cont (self, struct nn_cinproc, fsm);
+
+
     switch (cinproc->state) {
 
 /******************************************************************************/
@@ -156,13 +167,15 @@ static void nn_cinproc_handler (struct nn_fsm *self, int src, int type,
             switch (type) {
             case NN_FSM_START:
                 cinproc->state = NN_CINPROC_STATE_DISCONNECTED;
+                nn_epbase_stat_increment (&cinproc->item.epbase,
+                    NN_STAT_INPROGRESS_CONNECTIONS, 1);
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (cinproc->state, src, type);
             }
 
         default:
-            nn_assert (0);
+            nn_fsm_bad_source (cinproc->state, src, type);
         }
 
 /******************************************************************************/
@@ -175,9 +188,13 @@ static void nn_cinproc_handler (struct nn_fsm *self, int src, int type,
             switch (type) {
             case NN_CINPROC_ACTION_CONNECT:
                 cinproc->state = NN_CINPROC_STATE_ACTIVE;
+                nn_epbase_stat_increment (&cinproc->item.epbase,
+                    NN_STAT_INPROGRESS_CONNECTIONS, -1);
+                nn_epbase_stat_increment (&cinproc->item.epbase,
+                    NN_STAT_ESTABLISHED_CONNECTIONS, 1);
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (cinproc->state, src, type);
             }
 
         case NN_SINPROC_SRC_PEER:
@@ -186,26 +203,30 @@ static void nn_cinproc_handler (struct nn_fsm *self, int src, int type,
             case NN_SINPROC_CONNECT:
                 nn_sinproc_accept (&cinproc->sinproc, sinproc);
                 cinproc->state = NN_CINPROC_STATE_ACTIVE;
+                nn_epbase_stat_increment (&cinproc->item.epbase,
+                    NN_STAT_INPROGRESS_CONNECTIONS, -1);
+                nn_epbase_stat_increment (&cinproc->item.epbase,
+                    NN_STAT_ESTABLISHED_CONNECTIONS, 1);
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (cinproc->state, src, type);
             }
 
         default:
-            nn_assert (0);
+            nn_fsm_bad_source (cinproc->state, src, type);
         }
 
 /******************************************************************************/
 /*  ACTIVE state.                                                             */
 /******************************************************************************/
     case NN_CINPROC_STATE_ACTIVE:
-        nn_assert (0);
+        nn_fsm_bad_source (cinproc->state, src, type);
 
 /******************************************************************************/
 /*  Invalid state.                                                            */
 /******************************************************************************/
     default:
-        nn_assert (0);
+        nn_fsm_bad_state (cinproc->state, src, type);
     }
 }
 

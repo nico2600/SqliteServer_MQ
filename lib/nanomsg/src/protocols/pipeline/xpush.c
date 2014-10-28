@@ -32,6 +32,7 @@
 #include "../../utils/fast.h"
 #include "../../utils/alloc.h"
 #include "../../utils/list.h"
+#include "../../utils/attr.h"
 
 struct nn_xpush_data {
     struct nn_lb_data lb;
@@ -98,7 +99,6 @@ void nn_xpush_destroy (struct nn_sockbase *self)
 
 static int nn_xpush_add (struct nn_sockbase *self, struct nn_pipe *pipe)
 {
-    int rc;
     struct nn_xpush *xpush;
     struct nn_xpush_data *data;
     int sndprio;
@@ -107,14 +107,14 @@ static int nn_xpush_add (struct nn_sockbase *self, struct nn_pipe *pipe)
     xpush = nn_cont (self, struct nn_xpush, sockbase);
 
     sz = sizeof (sndprio);
-    rc = nn_sockbase_getopt (&xpush->sockbase, NN_SNDPRIO, &sndprio, &sz);
-    errnum_assert (rc == 0, -rc);
+    nn_pipe_getopt (pipe, NN_SOL_SOCKET, NN_SNDPRIO, &sndprio, &sz);
     nn_assert (sz == sizeof (sndprio));
+    nn_assert (sndprio >= 1 && sndprio <= 16);
 
     data = nn_alloc (sizeof (struct nn_xpush_data), "pipe data (push)");
     alloc_assert (data);
     nn_pipe_setdata (pipe, data);
-    nn_lb_add (&xpush->lb, pipe, &data->lb, sndprio);
+    nn_lb_add (&xpush->lb, &data->lb, pipe, sndprio);
 
     return 0;
 }
@@ -126,11 +126,15 @@ static void nn_xpush_rm (struct nn_sockbase *self, struct nn_pipe *pipe)
 
     xpush = nn_cont (self, struct nn_xpush, sockbase);
     data = nn_pipe_getdata (pipe);
-    nn_lb_rm (&xpush->lb, pipe, &data->lb);
+    nn_lb_rm (&xpush->lb, &data->lb);
     nn_free (data);
+
+    nn_sockbase_stat_increment (self, NN_STAT_CURRENT_SND_PRIORITY,
+        nn_lb_get_priority (&xpush->lb));
 }
 
-static void nn_xpush_in (struct nn_sockbase *self, struct nn_pipe *pipe)
+static void nn_xpush_in (NN_UNUSED struct nn_sockbase *self,
+    NN_UNUSED struct nn_pipe *pipe)
 {
     /*  We are not going to receive any messages, so there's no need to store
         the list of inbound pipes. */
@@ -143,7 +147,9 @@ static void nn_xpush_out (struct nn_sockbase *self, struct nn_pipe *pipe)
 
     xpush = nn_cont (self, struct nn_xpush, sockbase);
     data = nn_pipe_getdata (pipe);
-    nn_lb_out (&xpush->lb, pipe, &data->lb);
+    nn_lb_out (&xpush->lb, &data->lb);
+    nn_sockbase_stat_increment (self, NN_STAT_CURRENT_SND_PRIORITY,
+        nn_lb_get_priority (&xpush->lb));
 }
 
 static int nn_xpush_events (struct nn_sockbase *self)
@@ -154,17 +160,20 @@ static int nn_xpush_events (struct nn_sockbase *self)
 
 static int nn_xpush_send (struct nn_sockbase *self, struct nn_msg *msg)
 {
-    return nn_lb_send (&nn_cont (self, struct nn_xpush, sockbase)->lb, msg);
+    return nn_lb_send (&nn_cont (self, struct nn_xpush, sockbase)->lb,
+        msg, NULL);
 }
 
-static int nn_xpush_setopt (struct nn_sockbase *self, int level, int option,
-        const void *optval, size_t optvallen)
+static int nn_xpush_setopt (NN_UNUSED struct nn_sockbase *self,
+    NN_UNUSED int level, NN_UNUSED int option,
+    NN_UNUSED const void *optval, NN_UNUSED size_t optvallen)
 {
     return -ENOPROTOOPT;
 }
 
-static int nn_xpush_getopt (struct nn_sockbase *self, int level, int option,
-        void *optval, size_t *optvallen)
+static int nn_xpush_getopt (NN_UNUSED struct nn_sockbase *self,
+    NN_UNUSED int level, NN_UNUSED int option,
+    NN_UNUSED void *optval, NN_UNUSED size_t *optvallen)
 {
     return -ENOPROTOOPT;
 }

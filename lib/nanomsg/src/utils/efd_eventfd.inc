@@ -21,8 +21,9 @@
 */
 
 #include "err.h"
+#include "int.h"
+#include "closefd.h"
 
-#include <stdint.h>
 #include <sys/eventfd.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -38,9 +39,9 @@ int nn_efd_init (struct nn_efd *self)
     errno_assert (self->efd != -1);
 
     flags = fcntl (self->efd, F_GETFL, 0);
-	if (flags == -1)
+    if (flags == -1)
         flags = 0;
-	rc = fcntl (self->efd, F_SETFL, flags | O_NONBLOCK);
+    rc = fcntl (self->efd, F_SETFL, flags | O_NONBLOCK);
     errno_assert (rc != -1);
 
     return 0;
@@ -48,10 +49,7 @@ int nn_efd_init (struct nn_efd *self)
 
 void nn_efd_term (struct nn_efd *self)
 {
-    int rc;
-
-    rc = close (self->efd);
-    errno_assert (rc == 0);
+    nn_closefd (self->efd);
 }
 
 nn_fd nn_efd_getfd (struct nn_efd *self)

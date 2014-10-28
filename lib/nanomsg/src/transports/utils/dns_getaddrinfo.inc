@@ -39,17 +39,20 @@
 /*  Private functions. */
 static void nn_dns_handler (struct nn_fsm *self, int src, int type,
     void *srcptr);
+static void nn_dns_shutdown (struct nn_fsm *self, int src, int type,
+    void *srcptr);
 
 void nn_dns_init (struct nn_dns *self, int src, struct nn_fsm *owner)
 {
-    nn_fsm_init (&self->fsm, nn_dns_handler, src, self, owner);
+    nn_fsm_init (&self->fsm, nn_dns_handler, nn_dns_shutdown,
+        src, self, owner);
     self->state = NN_DNS_STATE_IDLE;
     nn_fsm_event_init (&self->done);
 }
 
 void nn_dns_term (struct nn_dns *self)
 {
-    nn_assert (self->state == NN_DNS_STATE_IDLE);
+    nn_assert_state (self, NN_DNS_STATE_IDLE);
 
     nn_fsm_event_term (&self->done);
     nn_fsm_term (&self->fsm);
@@ -68,7 +71,7 @@ void nn_dns_start (struct nn_dns *self, const char *addr, size_t addrlen,
     struct addrinfo *reply;
     char hostname [NN_SOCKADDR_MAX];
 
-    nn_assert (self->state == NN_DNS_STATE_IDLE);
+    nn_assert_state (self, NN_DNS_STATE_IDLE);
 
     self->result = result;
 
@@ -120,21 +123,27 @@ void nn_dns_stop (struct nn_dns *self)
     nn_fsm_stop (&self->fsm);
 }
 
+static void nn_dns_shutdown (struct nn_fsm *self, int src, int type,
+    void *srcptr)
+{
+    struct nn_dns *dns;
+
+    dns = nn_cont (self, struct nn_dns, fsm);
+    if (nn_slow (src == NN_FSM_ACTION && type == NN_FSM_STOP)) {
+        nn_fsm_stopped (&dns->fsm, NN_DNS_STOPPED);
+        dns->state = NN_DNS_STATE_IDLE;
+        return;
+    }
+
+    nn_fsm_bad_state(dns->state, src, type);
+}
+
 static void nn_dns_handler (struct nn_fsm *self, int src, int type,
     void *srcptr)
 {
     struct nn_dns *dns;
 
     dns = nn_cont (self, struct nn_dns, fsm);
-
-/******************************************************************************/
-/*  STOP procedure.                                                           */
-/******************************************************************************/
-    if (nn_slow (src == NN_FSM_ACTION && type == NN_FSM_STOP)) {
-        nn_fsm_stopped (&dns->fsm, NN_DNS_STOPPED);
-        dns->state = NN_DNS_STATE_IDLE;
-        return;
-    }
 
     switch (dns->state) {
 /******************************************************************************/
@@ -146,26 +155,26 @@ static void nn_dns_handler (struct nn_fsm *self, int src, int type,
             switch (type) {
             case NN_FSM_START:
                 nn_fsm_raise (&dns->fsm, &dns->done, NN_DNS_DONE);
-                self->state = NN_DNS_STATE_DONE;
+                dns->state = NN_DNS_STATE_DONE;
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (dns->state, src, type);
             }
         default:
-            nn_assert (0);
+            nn_fsm_bad_source (dns->state, src, type);
         }
 
 /******************************************************************************/
 /*  DONE state.                                                               */
 /******************************************************************************/
     case NN_DNS_STATE_DONE:
-        nn_assert (0);
+        nn_fsm_bad_source (dns->state, src, type);
 
 /******************************************************************************/
 /*  Invalid state.                                                            */
 /******************************************************************************/
     default:
-        nn_assert (0);
+        nn_fsm_bad_state (dns->state, src, type);
     }
 }
 

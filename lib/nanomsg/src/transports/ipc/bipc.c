@@ -20,8 +20,6 @@
     IN THE SOFTWARE.
 */
 
-#if !defined NN_HAVE_WINDOWS
-
 #include "bipc.h"
 #include "aipc.h"
 
@@ -35,8 +33,12 @@
 #include "../../utils/fast.h"
 
 #include <string.h>
+#if defined NN_HAVE_WINDOWS
+#include "../../utils/win.h"
+#else
 #include <unistd.h>
 #include <sys/un.h>
+#endif
 
 #define NN_BIPC_BACKLOG 10
 
@@ -80,6 +82,8 @@ const struct nn_epbase_vfptr nn_bipc_epbase_vfptr = {
 /*  Private functions. */
 static void nn_bipc_handler (struct nn_fsm *self, int src, int type,
     void *srcptr);
+static void nn_bipc_shutdown (struct nn_fsm *self, int src, int type,
+    void *srcptr);
 static void nn_bipc_start_listening (struct nn_bipc *self);
 static void nn_bipc_start_accepting (struct nn_bipc *self);
 
@@ -93,7 +97,7 @@ int nn_bipc_create (void *hint, struct nn_epbase **epbase)
 
     /*  Initialise the structure. */
     nn_epbase_init (&self->epbase, &nn_bipc_epbase_vfptr, hint);
-    nn_fsm_init_root (&self->fsm, nn_bipc_handler,
+    nn_fsm_init_root (&self->fsm, nn_bipc_handler, nn_bipc_shutdown,
         nn_epbase_getctx (&self->epbase));
     self->state = NN_BIPC_STATE_IDLE;
     nn_usock_init (&self->usock, NN_BIPC_SRC_USOCK, &self->fsm);
@@ -124,7 +128,7 @@ static void nn_bipc_destroy (struct nn_epbase *self)
 
     bipc = nn_cont (self, struct nn_bipc, epbase);
 
-    nn_assert (bipc->state == NN_BIPC_STATE_IDLE);
+    nn_assert_state (bipc, NN_BIPC_STATE_IDLE);
     nn_list_term (&bipc->aipcs);
     nn_assert (bipc->aipc == NULL);
     nn_usock_term (&bipc->usock);
@@ -134,7 +138,7 @@ static void nn_bipc_destroy (struct nn_epbase *self)
     nn_free (bipc);
 }
 
-static void nn_bipc_handler (struct nn_fsm *self, int src, int type,
+static void nn_bipc_shutdown (struct nn_fsm *self, int src, int type,
     void *srcptr)
 {
     struct nn_bipc *bipc;
@@ -143,9 +147,6 @@ static void nn_bipc_handler (struct nn_fsm *self, int src, int type,
 
     bipc = nn_cont (self, struct nn_bipc, fsm);
 
-/******************************************************************************/
-/*  STOP procedure.                                                           */
-/******************************************************************************/
     if (nn_slow (src == NN_FSM_ACTION && type == NN_FSM_STOP)) {
         nn_aipc_stop (bipc->aipc);
         bipc->state = NN_BIPC_STATE_STOPPING_AIPC;
@@ -177,7 +178,7 @@ static void nn_bipc_handler (struct nn_fsm *self, int src, int type,
         nn_list_erase (&bipc->aipcs, &aipc->item);
         nn_aipc_term (aipc);
         nn_free (aipc);
-        
+
         /*  If there are no more aipc state machines, we can stop the whole
             bipc object. */
 aipcs_stopping:
@@ -190,6 +191,17 @@ aipcs_stopping:
 
         return;
     }
+
+    nn_fsm_bad_state(bipc->state, src, type);
+}
+
+static void nn_bipc_handler (struct nn_fsm *self, int src, int type,
+    void *srcptr)
+{
+    struct nn_bipc *bipc;
+    struct nn_aipc *aipc;
+
+    bipc = nn_cont (self, struct nn_bipc, fsm);
 
     switch (bipc->state) {
 
@@ -207,11 +219,11 @@ aipcs_stopping:
                 bipc->state = NN_BIPC_STATE_ACTIVE;
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (bipc->state, src, type);
             }
 
         default:
-            nn_assert (0);
+            nn_fsm_bad_source (bipc->state, src, type);
         }
 
 /******************************************************************************/
@@ -235,7 +247,7 @@ aipcs_stopping:
                 return;
 
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (bipc->state, src, type);
             }
         }
 
@@ -253,14 +265,14 @@ aipcs_stopping:
             nn_free (aipc);
             return;
         default:
-            nn_assert (0);
+            nn_fsm_bad_action (bipc->state, src, type);
         }
 
 /******************************************************************************/
 /*  Invalid state.                                                            */
 /******************************************************************************/
     default:
-        nn_assert (0);
+        nn_fsm_bad_state (bipc->state, src, type);
     }
 }
 
@@ -284,9 +296,12 @@ static void nn_bipc_start_listening (struct nn_bipc *self)
     strncpy (un->sun_path, addr, sizeof (un->sun_path));
 
     /*  Delete the IPC file left over by eventual previous runs of
-        the application. */
+        the application. On Windows plaform, NamedPipe is used which
+        does not have an underlying file. */
+#if !defined NN_HAVE_WINDOWS
     rc = unlink (addr);
     errno_assert (rc == 0 || errno == ENOENT);
+#endif
 
     /*  Start listening for incoming connections. */
     rc = nn_usock_start (&self->usock, AF_UNIX, SOCK_STREAM, 0);
@@ -311,6 +326,3 @@ static void nn_bipc_start_accepting (struct nn_bipc *self)
     /*  Start waiting for a new incoming connection. */
     nn_aipc_start (self->aipc, &self->usock);
 }
-
-#endif
-

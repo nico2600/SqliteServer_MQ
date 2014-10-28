@@ -37,22 +37,20 @@ void nn_lb_term (struct nn_lb *self)
     nn_priolist_term (&self->priolist);
 }
 
-void nn_lb_add (struct nn_lb *self, struct nn_pipe *pipe,
-    struct nn_lb_data *data, int priority)
+void nn_lb_add (struct nn_lb *self, struct nn_lb_data *data,
+    struct nn_pipe *pipe, int priority)
 {
-    nn_priolist_add (&self->priolist, pipe, &data->priolist, priority);
+    nn_priolist_add (&self->priolist, &data->priodata, pipe, priority);
 }
 
-void nn_lb_rm (struct nn_lb *self, struct nn_pipe *pipe,
-    struct nn_lb_data *data)
+void nn_lb_rm (struct nn_lb *self, struct nn_lb_data *data)
 {
-    nn_priolist_rm (&self->priolist, pipe, &data->priolist);
+    nn_priolist_rm (&self->priolist, &data->priodata);
 }
 
-void nn_lb_out (struct nn_lb *self, struct nn_pipe *pipe,
-    struct nn_lb_data *data)
+void nn_lb_out (struct nn_lb *self, struct nn_lb_data *data)
 {
-    nn_priolist_activate (&self->priolist, pipe, &data->priolist);
+    nn_priolist_activate (&self->priolist, &data->priodata);
 }
 
 int nn_lb_can_send (struct nn_lb *self)
@@ -60,7 +58,12 @@ int nn_lb_can_send (struct nn_lb *self)
     return nn_priolist_is_active (&self->priolist);
 }
 
-int nn_lb_send (struct nn_lb *self, struct nn_msg *msg)
+int nn_lb_get_priority (struct nn_lb *self)
+{
+    return nn_priolist_get_priority (&self->priolist);
+}
+
+int nn_lb_send (struct nn_lb *self, struct nn_msg *msg, struct nn_pipe **to)
 {
     int rc;
     struct nn_pipe *pipe;
@@ -76,6 +79,9 @@ int nn_lb_send (struct nn_lb *self, struct nn_msg *msg)
 
     /*  Move to the next pipe. */
     nn_priolist_advance (&self->priolist, rc & NN_PIPE_RELEASE);
+
+    if (to != NULL)
+        *to = pipe;
 
     return rc & ~NN_PIPE_RELEASE;
 }

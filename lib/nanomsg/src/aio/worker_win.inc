@@ -1,5 +1,6 @@
 /*
     Copyright (c) 2013 250bpm s.r.o.  All rights reserved.
+    Copyright (c) 2013 GoPivotal, Inc.  All rights reserved.
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"),
@@ -40,8 +41,10 @@ const int nn_worker_stop = 0;
 /*  Private functions. */
 static void nn_worker_routine (void *arg);
 
-void nn_worker_task_init (struct nn_worker_task *self,struct nn_fsm *owner)
+void nn_worker_task_init (struct nn_worker_task *self, int src,
+    struct nn_fsm *owner)
 {
+    self->src = src;
     self->owner = owner;
 }
 
@@ -49,20 +52,22 @@ void nn_worker_task_term (struct nn_worker_task *self)
 {
 }
 
-void nn_worker_op_init (struct nn_worker_op *self, struct nn_fsm *owner)
+void nn_worker_op_init (struct nn_worker_op *self, int src,
+    struct nn_fsm *owner)
 {
+    self->src = src;
     self->owner = owner;
     self->state = NN_WORKER_OP_STATE_IDLE;
 }
 
 void nn_worker_op_term (struct nn_worker_op *self)
 {
-    nn_assert (self->state == NN_WORKER_OP_STATE_IDLE);
+    nn_assert_state (self, NN_WORKER_OP_STATE_IDLE);
 }
 
 void nn_worker_op_start (struct nn_worker_op *self, int zeroiserror)
 {
-    nn_assert (self->state == NN_WORKER_OP_STATE_IDLE);
+    nn_assert_state (self, NN_WORKER_OP_STATE_IDLE);
     self->state = zeroiserror ? NN_WORKER_OP_STATE_ACTIVE_ZEROISERROR :
         NN_WORKER_OP_STATE_ACTIVE;
 }
@@ -150,7 +155,7 @@ static void nn_worker_routine (void *arg)
             errnum_assert (rc == 0, -rc);
             timer = nn_cont (thndl, struct nn_worker_timer, hndl);
             nn_ctx_enter (timer->owner->ctx);
-            timer->owner->fn (timer->owner, -1, NN_WORKER_TIMER_TIMEOUT, timer);
+            nn_fsm_feed (timer->owner, -1, NN_WORKER_TIMER_TIMEOUT, timer);
             nn_ctx_leave (timer->owner->ctx);
         }
 
@@ -195,7 +200,7 @@ static void nn_worker_routine (void *arg)
                       entries [i].dwNumberOfBytesTransferred == 0)
                     rc = NN_WORKER_OP_ERROR;
                 op->state = NN_WORKER_OP_STATE_IDLE;
-                op->owner->fn (op->owner, -1, rc, op);
+                nn_fsm_feed (op->owner, op->src, rc, op);
                 nn_ctx_leave (op->owner->ctx);
 
                 continue;
@@ -209,7 +214,8 @@ static void nn_worker_routine (void *arg)
             /*  Process tasks. */
             task = (struct nn_worker_task*) entries [i].lpCompletionKey;
             nn_ctx_enter (task->owner->ctx);
-            task->owner->fn (task->owner, -1, NN_WORKER_TASK_EXECUTE, task);
+            nn_fsm_feed (task->owner, task->src,
+                NN_WORKER_TASK_EXECUTE, task);
             nn_ctx_leave (task->owner->ctx);
         }
     }

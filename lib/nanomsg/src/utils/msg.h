@@ -57,10 +57,14 @@ void nn_msg_cp (struct nn_msg *dst, struct nn_msg *src);
 /*  Bulk copying is done by first invoking nn_msg_bulkcopy_start on the source
     message and specifying how many copies of the message will be made. Then,
     nn_msg_bulkcopy_cp should be used 'copies' of times to make individual
-    copies of the source message. Note: Using bulk copying is more efficient
-    than making each copy separately. */
+    copies of the source message. Note: Bulk copying is more efficient than
+    making each copy separately. */
 void nn_msg_bulkcopy_start (struct nn_msg *self, uint32_t copies);
 void nn_msg_bulkcopy_cp (struct nn_msg *dst, struct nn_msg *src);
+
+/** Replaces the message body with entirely new data.  This allows protocols
+    that substantially rewrite or preprocess the userland message to be written. */
+void nn_msg_replace_body(struct nn_msg *self, struct nn_chunkref newBody);
 
 #endif
 

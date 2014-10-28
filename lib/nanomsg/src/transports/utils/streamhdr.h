@@ -29,7 +29,7 @@
 #include "../../aio/usock.h"
 #include "../../aio/timer.h"
 
-#include <stdint.h>
+#include "../../utils/int.h"
 
 /*  This state machine exchanges protocol headers on top of
     a stream-based bi-directional connection. */
@@ -47,7 +47,7 @@ struct nn_streamhdr {
     /*  Used to timeout the protocol header exchange. */
     struct nn_timer timer;
 
-    /*  The undelrying socket. */
+    /*  The underlying socket. */
     struct nn_usock *usock;
 
     /*  The original owner of the underlying socket. */

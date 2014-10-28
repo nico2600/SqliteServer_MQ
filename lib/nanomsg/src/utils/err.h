@@ -47,6 +47,19 @@
         if (nn_slow (!(x))) {\
             fprintf (stderr, "Assertion failed: %s (%s:%d)\n", #x, \
                 __FILE__, __LINE__);\
+            fflush (stderr);\
+            nn_err_abort ();\
+        }\
+    } while (0)
+
+#define nn_assert_state(obj, state_name) \
+    do {\
+        if (nn_slow ((obj)->state != state_name)) {\
+            fprintf (stderr, \
+                "Assertion failed: %d == %s (%s:%d)\n", \
+                (obj)->state, #state_name, \
+                __FILE__, __LINE__);\
+            fflush (stderr);\
             nn_err_abort ();\
         }\
     } while (0)
@@ -57,6 +70,7 @@
         if (nn_slow (!x)) {\
             fprintf (stderr, "Out of memory (%s:%d)\n",\
                 __FILE__, __LINE__);\
+            fflush (stderr);\
             nn_err_abort ();\
         }\
     } while (0)
@@ -67,6 +81,7 @@
         if (nn_slow (!(x))) {\
             fprintf (stderr, "%s [%d] (%s:%d)\n", nn_err_strerror (errno),\
                 (int) errno, __FILE__, __LINE__);\
+            fflush (stderr);\
             nn_err_abort ();\
         }\
     } while (0)
@@ -77,6 +92,7 @@
         if (nn_slow (!(cond))) {\
             fprintf (stderr, "%s [%d] (%s:%d)\n", nn_err_strerror (err),\
                 (int) (err), __FILE__, __LINE__);\
+            fflush (stderr);\
             nn_err_abort ();\
         }\
     } while (0)
@@ -89,6 +105,7 @@
             nn_win_error ((int) GetLastError (), errstr, 256);\
             fprintf (stderr, "%s [%d] (%s:%d)\n",\
                 errstr, (int) GetLastError (), __FILE__, __LINE__);\
+            fflush (stderr);\
             nn_err_abort ();\
         }\
     } while (0)
@@ -101,9 +118,26 @@
             nn_win_error (WSAGetLastError (), errstr, 256);\
             fprintf (stderr, "%s [%d] (%s:%d)\n",\
                 errstr, (int) WSAGetLastError (), __FILE__, __LINE__);\
+            fflush (stderr);\
             nn_err_abort ();\
         }\
     } while (0)
+
+/*  Assertion-like macros for easier fsm debugging. */
+#define nn_fsm_error(message, state, src, type) \
+    do {\
+        fprintf (stderr, "%s: state=%d source=%d action=%d (%s:%d)\n", \
+            message, state, src, type, __FILE__, __LINE__);\
+        fflush (stderr);\
+        nn_err_abort ();\
+    } while (0)
+
+#define nn_fsm_bad_action(state, src, type) nn_fsm_error(\
+    "Unexpected action", state, src, type)
+#define nn_fsm_bad_state(state, src, type) nn_fsm_error(\
+    "Unexpected state", state, src, type)
+#define nn_fsm_bad_source(state, src, type) nn_fsm_error(\
+    "Unexpected source", state, src, type)
 
 /*  Compile-time assert. */
 #define CT_ASSERT_HELPER2(prefix, line) prefix##line

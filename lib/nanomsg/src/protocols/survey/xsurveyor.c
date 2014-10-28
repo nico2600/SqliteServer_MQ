@@ -31,6 +31,7 @@
 #include "../../utils/list.h"
 #include "../../utils/alloc.h"
 #include "../../utils/list.h"
+#include "../../utils/attr.h"
 
 #include <stddef.h>
 
@@ -81,15 +82,22 @@ int nn_xsurveyor_add (struct nn_sockbase *self, struct nn_pipe *pipe)
 {
     struct nn_xsurveyor *xsurveyor;
     struct nn_xsurveyor_data *data;
+    int rcvprio;
+    size_t sz;
 
     xsurveyor = nn_cont (self, struct nn_xsurveyor, sockbase);
+
+    sz = sizeof (rcvprio);
+    nn_pipe_getopt (pipe, NN_SOL_SOCKET, NN_RCVPRIO, &rcvprio, &sz);
+    nn_assert (sz == sizeof (rcvprio));
+    nn_assert (rcvprio >= 1 && rcvprio <= 16);
 
     data = nn_alloc (sizeof (struct nn_xsurveyor_data),
         "pipe data (xsurveyor)");
     alloc_assert (data);
     data->pipe = pipe;
-    nn_fq_add (&xsurveyor->inpipes, pipe, &data->initem, 8);
-    nn_dist_add (&xsurveyor->outpipes, pipe, &data->outitem);
+    nn_fq_add (&xsurveyor->inpipes, &data->initem, pipe, rcvprio);
+    nn_dist_add (&xsurveyor->outpipes, &data->outitem, pipe);
     nn_pipe_setdata (pipe, data);
 
     return 0;
@@ -103,8 +111,8 @@ void nn_xsurveyor_rm (struct nn_sockbase *self, struct nn_pipe *pipe)
     xsurveyor = nn_cont (self, struct nn_xsurveyor, sockbase);
     data = nn_pipe_getdata (pipe);
 
-    nn_fq_rm (&xsurveyor->inpipes, pipe, &data->initem);
-    nn_dist_rm (&xsurveyor->outpipes, pipe, &data->outitem);
+    nn_fq_rm (&xsurveyor->inpipes, &data->initem);
+    nn_dist_rm (&xsurveyor->outpipes, &data->outitem);
 
     nn_free (data);
 }
@@ -117,7 +125,7 @@ void nn_xsurveyor_in (struct nn_sockbase *self, struct nn_pipe *pipe)
     xsurveyor = nn_cont (self, struct nn_xsurveyor, sockbase);
     data = nn_pipe_getdata (pipe);
 
-    nn_fq_in (&xsurveyor->inpipes, pipe, &data->initem);
+    nn_fq_in (&xsurveyor->inpipes, &data->initem);
 }
 
 void nn_xsurveyor_out (struct nn_sockbase *self, struct nn_pipe *pipe)
@@ -128,7 +136,7 @@ void nn_xsurveyor_out (struct nn_sockbase *self, struct nn_pipe *pipe)
     xsurveyor = nn_cont (self, struct nn_xsurveyor, sockbase);
     data = nn_pipe_getdata (pipe);
 
-    nn_dist_out (&xsurveyor->outpipes, pipe, &data->outitem);
+    nn_dist_out (&xsurveyor->outpipes, &data->outitem);
 }
 
 int nn_xsurveyor_events (struct nn_sockbase *self)
@@ -178,14 +186,16 @@ int nn_xsurveyor_recv (struct nn_sockbase *self, struct nn_msg *msg)
     return 0;
 }
 
-int nn_xsurveyor_setopt (struct nn_sockbase *self, int level, int option,
-        const void *optval, size_t optvallen)
+int nn_xsurveyor_setopt (NN_UNUSED struct nn_sockbase *self,
+    NN_UNUSED int level, NN_UNUSED int option,
+    NN_UNUSED const void *optval, NN_UNUSED size_t optvallen)
 {
     return -ENOPROTOOPT;
 }
 
-int nn_xsurveyor_getopt (struct nn_sockbase *self, int level, int option,
-        void *optval, size_t *optvallen)
+int nn_xsurveyor_getopt (NN_UNUSED struct nn_sockbase *self,
+    NN_UNUSED int level, NN_UNUSED int option,
+    NN_UNUSED void *optval, NN_UNUSED size_t *optvallen)
 {
     return -ENOPROTOOPT;
 }

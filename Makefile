@@ -1,15 +1,14 @@
 .PHONY: all clean lib src test
 
 all:
-	cd lib; make all
 	cd src; make all
 
 clean:
-	cd lib; make clean
+	cd lib/nanomsg; make clean
 	cd src; make clean
 
 lib:
-	cd lib; make
+	cd lib/nanomsg; ./autogen; ./configure; make install
 
 src:
 	cd src; make

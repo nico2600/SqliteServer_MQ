@@ -31,210 +31,88 @@ enable_testing ()
 
 #  Platform checks.
 
-if (${CMAKE_SYSTEM_NAME} MATCHES "Linux")
-    set (NN_HAVE_LINUX 1)
-    add_definitions (-DNN_HAVE_LINUX)
-endif ()
-
 if (${CMAKE_SYSTEM_NAME} MATCHES "Windows")
-    set (NN_HAVE_WINDOWS 1)
     add_definitions (-DNN_HAVE_WINDOWS)
-endif ()
+    add_definitions (-D_CRT_SECURE_NO_WARNINGS)
 
-if (${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    set (NN_HAVE_OSX 1)
-    add_definitions (-DNN_HAVE_OSX)
-endif ()
-
-if (${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
-    set (NN_HAVE_FREEBSD 1)
-    add_definitions (-DNN_HAVE_FREEBSD)
-endif ()
-
-if (${CMAKE_SYSTEM_NAME} MATCHES "NetBSD")
-    set (NN_HAVE_NETBSD 1)
-    add_definitions (-DNN_HAVE_NETBSD)
-endif ()
-
-if (${CMAKE_SYSTEM_NAME} MATCHES "OpenBSD")
-    set (NN_HAVE_OPENBSD 1)
-    add_definitions (-DNN_HAVE_OPENBSD)
-endif ()
-
-if (${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
-    set (NN_HAVE_SOLARIS 1)
-    add_definitions (-DNN_HAVE_SOLARIS)
-    list (APPEND CMAKE_REQUIRED_LIBRARIES socket)
-    list (APPEND CMAKE_REQUIRED_LIBRARIES nsl)
-endif ()
-
-#  Feature checks.
-
-find_package (Threads)
-
-check_include_files (sys/eventfd.h NN_HAVE_EVENTFD)
-if (NN_HAVE_EVENTFD)
-    add_definitions (-DNN_HAVE_EVENTFD)
-endif()
-
-check_symbol_exists (pipe "unistd.h" NN_HAVE_PIPE)
-if (NN_HAVE_PIPE)
-    add_definitions (-DNN_HAVE_PIPE)
-endif()
-
-list (APPEND CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
-check_symbol_exists (pipe2 "unistd.h" NN_HAVE_PIPE2)
-list (REMOVE_ITEM CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
-if (NN_HAVE_PIPE2)
-    add_definitions (-DNN_HAVE_PIPE2)
-    add_definitions (-D_GNU_SOURCE)
-endif()
-
-check_symbol_exists (socketpair "sys/types.h;sys/socket.h" NN_HAVE_SOCKETPAIR)
-if (NN_HAVE_SOCKETPAIR)
-    add_definitions (-DNN_HAVE_SOCKETPAIR)
-endif()
-
-check_symbol_exists (CLOCK_MONOTONIC time.h NN_HAVE_CLOCK_MONOTONIC)
-if (NN_HAVE_CLOCK_MONOTONIC)
-    add_definitions (-DNN_HAVE_CLOCK_MONOTONIC)
-endif()
-
-check_symbol_exists (gethrtime time.h NN_HAVE_GETHRTIME)
-if (NN_HAVE_GETHRTIME)
-    add_definitions (-DNN_HAVE_GETHRTIME)
-endif ()
-
-check_include_files (poll.h NN_HAVE_POLL)
-if (NN_HAVE_POLL)
-    add_definitions (-DNN_HAVE_POLL)
-endif()
-
-check_include_files (sys/epoll.h NN_HAVE_EPOLL)
-if (NN_HAVE_EPOLL)
-    add_definitions (-DNN_HAVE_EPOLL)
-endif ()
-
-check_symbol_exists (kqueue "sys/types.h;sys/event.h;sys/time.h" NN_HAVE_KQUEUE)
-if (NN_HAVE_KQUEUE)
-    add_definitions (-DNN_HAVE_KQUEUE)
-endif ()
-
-check_symbol_exists (getifaddrs "sys/types.h;ifaddrs.h" NN_HAVE_IFADDRS)
-if (NN_HAVE_IFADDRS)
-    add_definitions (-DNN_HAVE_IFADDRS)
-endif ()
-
-check_symbol_exists (SIOCGIFADDR sys/ioctl.h NN_HAVE_SIOCGIFADDR)
-if (NN_HAVE_SIOCGIFADDR)
-    add_definitions (-DNN_HAVE_SIOCGIFADDR)
-endif ()
-
-list (APPEND CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
-check_symbol_exists (accept4 sys/socket.h NN_HAVE_ACCEPT4)
-list (REMOVE_ITEM CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
-if (NN_HAVE_ACCEPT4)
-    add_definitions (-DNN_HAVE_ACCEPT4)
-    add_definitions (-D_GNU_SOURCE)
-endif ()
-
-list (APPEND CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
-list (APPEND CMAKE_REQUIRED_LIBRARIES anl)
-check_symbol_exists (getaddrinfo_a netdb.h NN_HAVE_GETADDRINFO_A)
-list (REMOVE_ITEM CMAKE_REQUIRED_LIBRARIES anl)
-list (REMOVE_ITEM CMAKE_REQUIRED_DEFINITIONS -D_GNU_SOURCE)
-if (NN_HAVE_GETADDRINFO_A)
-    add_definitions (-DNN_HAVE_GETADDRINFO_A)
-    add_definitions (-D_GNU_SOURCE)
-endif ()
-
-list (APPEND CMAKE_REQUIRED_LIBRARIES rt pthread)
-check_symbol_exists (sem_wait semaphore.h NN_HAVE_SEMAPHORE)
-list (REMOVE_ITEM CMAKE_REQUIRED_LIBRARIES rt pthread)
-if (NN_HAVE_SEMAPHORE)
-    add_definitions (-DNN_HAVE_SEMAPHORE)
-endif()
-
-check_c_source_compiles ("
-    #include <stdint.h>
-    int main()
-    {
-        volatile uint32_t n = 0;
-        __sync_fetch_and_add (&n, 1);
-        __sync_fetch_and_sub (&n, 1);
-        return 0;
-    }
-    " NN_HAVE_GCC_ATOMIC_BUILTINS)
-if (NN_HAVE_GCC_ATOMIC_BUILTINS)
-    add_definitions (-DNN_HAVE_GCC_ATOMIC_BUILTINS)
-endif ()
-
-#  Decide which features to actually use.
-
-if (NN_HAVE_EPOLL)
-    message ("-- Using epoll for socket monitoring")
-    add_definitions (-DNN_USE_EPOLL)
-elseif (NN_HAVE_KQUEUE)
-    message ("-- Using kqueue for socket monitoring")
-    add_definitions (-DNN_USE_KQUEUE)
-elseif (NN_HAVE_POLL)
-    message ("-- Using poll for socket monitoring")
-    add_definitions (-DNN_USE_POLL)
-endif ()
-
-if (NN_HAVE_EVENTFD)
-    message ("-- Using eventfd for signaling")
-    add_definitions (-DNN_USE_EVENTFD)
-elseif (NN_HAVE_PIPE)
-    message ("-- Using pipe for signaling")
-    add_definitions (-DNN_USE_PIPE)
-elseif (NN_HAVE_SOCKETPAIR)
-    message ("-- Using socketpair for signaling")
-    add_definitions (-DNN_USE_SOCKETPAIR)
-endif ()
-
-if (NN_HAVE_IFADDRS)
-    message ("-- Using getifaddrs for NIC name resolution")
-    add_definitions (-DNN_USE_IFADDRS)
-elseif (NN_HAVE_SIOCGIFADDR)
-    message ("-- Using SIOCGIFADDR for NIC name resolution")
-    add_definitions (-DNN_USE_SIOCGIFADDR)
+    if (MINGW)
+        add_definitions (-DNN_HAVE_MINGW -DNN_HAVE_STDINT -D_WIN32_WINNT=0x0600)
+    endif ()
 else ()
-    message ("-- No NIC name resolution mechanism used")
-    add_definitions (-DNN_USE_LITERAL_IFADDR)
+    message (FATAL_ERROR "ERROR: CMake build system is intended only to generate MSVC solution files.\nUse autotools build system for any other purpose." )
 endif ()
-
-#  Optional debugging/profiling tools to switch on.
-
-option (ALLOC_MONITOR "Add memory allocation monitoring" OFF)
-if (ALLOC_MONITOR)
-    add_definitions(-DNN_ALLOC_MONITOR)
-endif ()
-
-#  Version.
-
-file (READ "${PROJECT_SOURCE_DIR}/src/nn.h" NN_H_DATA)
-string (REGEX REPLACE ".*#define NN_VERSION_CURRENT ([0-9]+).*" "\\1" NN_VERSION_CURRENT "${NN_H_DATA}")
-string (REGEX REPLACE ".*#define NN_VERSION_REVISION ([0-9]+).*" "\\1" NN_VERSION_REVISION "${NN_H_DATA}")
-string (REGEX REPLACE ".*#define NN_VERSION_AGE ([0-9]+).*" "\\1" NN_VERSION_AGE "${NN_H_DATA}")
-set (NN_VERSION_STR "${NN_VERSION_CURRENT}.${NN_VERSION_REVISION}.${NN_VERSION_AGE}")
-
-#  Description
-
-set (NN_DESCRIPTION "nanomsg library is a high-performance implementation of several \"scalability protocols\". Scalability protocol's job is to define how multiple applications communicate to form a single distributed application")
 
 #  Build the library itself.
 
 add_subdirectory (src)
 
-# pkg-config file
+#  Build the tools
 
-if (UNIX)
-    configure_file (libnanomsg.pc.in libnanomsg.pc @ONLY)
-    install (FILES ${CMAKE_CURRENT_BINARY_DIR}/libnanomsg.pc DESTINATION lib/pkgconfig)
-endif ()
+add_executable (nanocat tools/nanocat.c tools/options.c)
+target_link_libraries (nanocat nanomsg)
 
-#  Installation.
+#  Build unit tests.
+
+set (all_tests "")
+
+macro (add_libnanomsg_test NAME)
+    list (APPEND all_tests ${NAME})
+    add_executable (${NAME} tests/${NAME}.c)
+    target_link_libraries (${NAME} nanomsg)
+    add_test (NAME ${NAME} COMMAND ${NAME})
+endmacro (add_libnanomsg_test)
+
+#  Transport tests.
+add_libnanomsg_test (inproc)
+add_libnanomsg_test (inproc_shutdown)
+add_libnanomsg_test (ipc)
+add_libnanomsg_test (ipc_shutdown)
+add_libnanomsg_test (ipc_stress)
+add_libnanomsg_test (tcp)
+add_libnanomsg_test (tcp_shutdown)
+
+#  Protocol tests.
+add_libnanomsg_test (pair)
+add_libnanomsg_test (pubsub)
+add_libnanomsg_test (reqrep)
+add_libnanomsg_test (pipeline)
+add_libnanomsg_test (survey)
+add_libnanomsg_test (bus)
+
+#  Feature tests.
+add_libnanomsg_test (block)
+add_libnanomsg_test (term)
+add_libnanomsg_test (timeo)
+add_libnanomsg_test (iovec)
+add_libnanomsg_test (msg)
+add_libnanomsg_test (prio)
+add_libnanomsg_test (poll)
+add_libnanomsg_test (device)
+add_libnanomsg_test (emfile)
+add_libnanomsg_test (domain)
+add_libnanomsg_test (trie)
+add_libnanomsg_test (list)
+add_libnanomsg_test (hash)
+add_libnanomsg_test (symbol)
+add_libnanomsg_test (separation)
+add_libnanomsg_test (zerocopy)
+add_libnanomsg_test (shutdown)
+
+#  Build the performance tests.
+
+macro (add_libnanomsg_perf NAME)
+    add_executable (${NAME} perf/${NAME}.c)
+    target_link_libraries (${NAME} nanomsg)
+endmacro (add_libnanomsg_perf)
+
+add_libnanomsg_perf (inproc_lat)
+add_libnanomsg_perf (inproc_thr)
+add_libnanomsg_perf (local_lat)
+add_libnanomsg_perf (remote_lat)
+add_libnanomsg_perf (local_thr)
+add_libnanomsg_perf (remote_thr)
+
+#  NSIS package
 
 install (FILES src/nn.h DESTINATION include/nanomsg)
 install (FILES src/inproc.h DESTINATION include/nanomsg)
@@ -246,4 +124,11 @@ install (FILES src/reqrep.h DESTINATION include/nanomsg)
 install (FILES src/pipeline.h DESTINATION include/nanomsg)
 install (FILES src/survey.h DESTINATION include/nanomsg)
 install (FILES src/bus.h DESTINATION include/nanomsg)
+
+install (TARGETS nanocat RUNTIME DESTINATION bin)
+
+set (CPACK_GENERATOR "NSIS")
+set (CPACK_PACKAGE_NAME "nanomsg")
+include (CPack)
+
 

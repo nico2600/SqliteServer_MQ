@@ -1,5 +1,5 @@
 /*
-    Copyright (c) 2012-2013 250bpm s.r.o.  All rights reserved.
+    Copyright (c) 2012-2014 250bpm s.r.o.  All rights reserved.
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
     of this software and associated documentation files (the "Software"),
@@ -30,6 +30,7 @@
 #include "../../utils/fast.h"
 #include "../../utils/alloc.h"
 #include "../../utils/list.h"
+#include "../../utils/attr.h"
 
 struct nn_xreq_data {
     struct nn_lb_data lb;
@@ -80,24 +81,30 @@ static void nn_xreq_destroy (struct nn_sockbase *self)
 
 int nn_xreq_add (struct nn_sockbase *self, struct nn_pipe *pipe)
 {
-    int rc;
     struct nn_xreq *xreq;
     struct nn_xreq_data *data;
     int sndprio;
+    int rcvprio;
     size_t sz;
 
     xreq = nn_cont (self, struct nn_xreq, sockbase);
 
     sz = sizeof (sndprio);
-    rc = nn_sockbase_getopt (&xreq->sockbase, NN_SNDPRIO, &sndprio, &sz);
-    errnum_assert (rc == 0, -rc);
+    nn_pipe_getopt (pipe, NN_SOL_SOCKET, NN_SNDPRIO, &sndprio, &sz);
     nn_assert (sz == sizeof (sndprio));
+    nn_assert (sndprio >= 1 && sndprio <= 16);
+
+    sz = sizeof (rcvprio);
+    nn_pipe_getopt (pipe, NN_SOL_SOCKET, NN_RCVPRIO, &rcvprio, &sz);
+    nn_assert (sz == sizeof (rcvprio));
+    nn_assert (rcvprio >= 1 && rcvprio <= 16);
 
     data = nn_alloc (sizeof (struct nn_xreq_data), "pipe data (req)");
     alloc_assert (data);
     nn_pipe_setdata (pipe, data);
-    nn_lb_add (&xreq->lb, pipe, &data->lb, sndprio);
-    nn_fq_add (&xreq->fq, pipe, &data->fq, 8);
+    nn_lb_add (&xreq->lb, &data->lb, pipe, sndprio);
+    nn_fq_add (&xreq->fq, &data->fq, pipe, rcvprio);
+
     return 0;
 }
 
@@ -108,9 +115,12 @@ void nn_xreq_rm (struct nn_sockbase *self, struct nn_pipe *pipe)
 
     xreq = nn_cont (self, struct nn_xreq, sockbase);
     data = nn_pipe_getdata (pipe);
-    nn_lb_rm (&xreq->lb, pipe, &data->lb);
-    nn_fq_rm (&xreq->fq, pipe, &data->fq);
+    nn_lb_rm (&xreq->lb, &data->lb);
+    nn_fq_rm (&xreq->fq, &data->fq);
     nn_free (data);
+
+    nn_sockbase_stat_increment (self, NN_STAT_CURRENT_SND_PRIORITY,
+        nn_lb_get_priority (&xreq->lb));
 }
 
 void nn_xreq_in (struct nn_sockbase *self, struct nn_pipe *pipe)
@@ -120,7 +130,7 @@ void nn_xreq_in (struct nn_sockbase *self, struct nn_pipe *pipe)
 
     xreq = nn_cont (self, struct nn_xreq, sockbase);
     data = nn_pipe_getdata (pipe);
-    nn_fq_in (&xreq->fq, pipe, &data->fq);
+    nn_fq_in (&xreq->fq, &data->fq);
 }
 
 void nn_xreq_out (struct nn_sockbase *self, struct nn_pipe *pipe)
@@ -130,7 +140,10 @@ void nn_xreq_out (struct nn_sockbase *self, struct nn_pipe *pipe)
 
     xreq = nn_cont (self, struct nn_xreq, sockbase);
     data = nn_pipe_getdata (pipe);
-    nn_lb_out (&xreq->lb, pipe, &data->lb);
+    nn_lb_out (&xreq->lb, &data->lb);
+
+    nn_sockbase_stat_increment (self, NN_STAT_CURRENT_SND_PRIORITY,
+        nn_lb_get_priority (&xreq->lb));
 }
 
 int nn_xreq_events (struct nn_sockbase *self)
@@ -145,10 +158,16 @@ int nn_xreq_events (struct nn_sockbase *self)
 
 int nn_xreq_send (struct nn_sockbase *self, struct nn_msg *msg)
 {
+    return nn_xreq_send_to (self, msg, NULL);
+}
+
+int nn_xreq_send_to (struct nn_sockbase *self, struct nn_msg *msg,
+    struct nn_pipe **to)
+{
     int rc;
 
     /*  If request cannot be sent due to the pushback, drop it silenly. */
-    rc = nn_lb_send (&nn_cont (self, struct nn_xreq, sockbase)->lb, msg);
+    rc = nn_lb_send (&nn_cont (self, struct nn_xreq, sockbase)->lb, msg, to);
     if (nn_slow (rc == -EAGAIN))
         return -EAGAIN;
     errnum_assert (rc >= 0, -rc);
@@ -185,14 +204,16 @@ int nn_xreq_recv (struct nn_sockbase *self, struct nn_msg *msg)
     return 0;
 }
 
-int nn_xreq_setopt (struct nn_sockbase *self, int level, int option,
-    const void *optval, size_t optvallen)
+int nn_xreq_setopt (NN_UNUSED struct nn_sockbase *self,
+    NN_UNUSED int level, NN_UNUSED int option,
+    NN_UNUSED const void *optval, NN_UNUSED size_t optvallen)
 {
     return -ENOPROTOOPT;
 }
 
-int nn_xreq_getopt (struct nn_sockbase *self, int level, int option,
-    void *optval, size_t *optvallen)
+int nn_xreq_getopt (NN_UNUSED struct nn_sockbase *self,
+    NN_UNUSED int level, NN_UNUSED int option,
+    NN_UNUSED void *optval, NN_UNUSED size_t *optvallen)
 {
     return -ENOPROTOOPT;
 }

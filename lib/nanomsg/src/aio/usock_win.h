@@ -1,4 +1,4 @@
-/*  
+/*
     Copyright (c) 2013 250bpm s.r.o.  All rights reserved.
 
     Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -31,8 +31,18 @@ struct nn_usock {
     struct nn_fsm fsm;
     int state;
 
-    /*  The actual underlying socket. */
-    SOCKET s;
+    union {
+
+        /*  The actual underlying socket. Can be used as a HANDLE too. */
+        SOCKET s;
+
+        /*  Named pipe handle. Cannot be used as a SOCKET. */
+        HANDLE p;
+    };
+
+    /*  For NamedPipes, closing an accepted pipe differs from other pipes.
+        If the NamedPipe was accepted, this member is set to 1. 0 otherwise. */
+    int isaccepted;
 
     /*  Asynchronous operations being executed on the socket. */
     struct nn_worker_op in;
@@ -45,7 +55,7 @@ struct nn_usock {
     int type;
     int protocol;
 
-    /*  Events raised by the usock. */ 
+    /*  Events raised by the usock. */
     struct nn_fsm_event event_established;
     struct nn_fsm_event event_sent;
     struct nn_fsm_event event_received;
@@ -58,4 +68,13 @@ struct nn_usock {
     /*  Buffer allocated for output of AcceptEx function. If accepting is not
         done on this socket, the field is set to NULL. */
     void *ainfo;
+
+    /*  For NamedPipes, we store the address inside the socket. */
+    struct sockaddr_un pipename;
+
+    /*  For now we allocate a new buffer for each write to a named pipe. */
+    void *pipesendbuf;
+
+    /*  Errno remembered in NN_USOCK_ERROR state  */
+    int errnum;
 };

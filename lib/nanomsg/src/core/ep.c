@@ -29,6 +29,7 @@
 #include "../utils/err.h"
 #include "../utils/cont.h"
 #include "../utils/fast.h"
+#include "../utils/attr.h"
 
 #include <string.h>
 
@@ -41,30 +42,28 @@
 /*  Private functions. */
 static void nn_ep_handler (struct nn_fsm *self, int src, int type,
     void *srcptr);
+static void nn_ep_shutdown (struct nn_fsm *self, int src, int type,
+    void *srcptr);
 
 int nn_ep_init (struct nn_ep *self, int src, struct nn_sock *sock, int eid,
     struct nn_transport *transport, int bind, const char *addr)
 {
     int rc;
 
-    nn_fsm_init (&self->fsm, nn_ep_handler, src, self, &sock->fsm);
+    nn_fsm_init (&self->fsm, nn_ep_handler, nn_ep_shutdown,
+        src, self, &sock->fsm);
     self->state = NN_EP_STATE_IDLE;
 
     self->epbase = NULL;
     self->sock = sock;
     self->eid = eid;
+    self->last_errno = 0;
     nn_list_item_init (&self->item);
+    memcpy (&self->options, &sock->ep_template, sizeof(struct nn_ep_options));
 
     /*  Store the textual form of the address. */
     nn_assert (strlen (addr) <= NN_SOCKADDR_MAX);
-#if defined _MSC_VER
-#pragma warning (push)
-#pragma warning (disable:4996)
-#endif
     strcpy (self->addr, addr);
-#if defined _MSC_VER
-#pragma warning (pop)
-#endif
 
     /*  Create transport-specific part of the endpoint. */
     if (bind)
@@ -84,7 +83,7 @@ int nn_ep_init (struct nn_ep *self, int src, struct nn_sock *sock, int eid,
 
 void nn_ep_term (struct nn_ep *self)
 {
-    nn_assert (self->state == NN_EP_STATE_IDLE);
+    nn_assert_state (self, NN_EP_STATE_IDLE);
 
     self->epbase->vfptr->destroy (self->epbase);
     nn_list_item_term (&self->item);
@@ -135,15 +134,14 @@ int nn_ep_ispeer (struct nn_ep *self, int socktype)
     return nn_sock_ispeer (self->sock, socktype);
 }
 
-static void nn_ep_handler (struct nn_fsm *self, int src, int type, void *srcptr)
+
+static void nn_ep_shutdown (struct nn_fsm *self, int src, int type,
+    NN_UNUSED void *srcptr)
 {
     struct nn_ep *ep;
 
     ep = nn_cont (self, struct nn_ep, fsm);
 
-/******************************************************************************/
-/*  STOP procedure.                                                           */
-/******************************************************************************/
     if (nn_slow (src == NN_FSM_ACTION && type == NN_FSM_STOP)) {
         ep->epbase->vfptr->stop (ep->epbase);
         ep->state = NN_EP_STATE_STOPPING;
@@ -156,6 +154,17 @@ static void nn_ep_handler (struct nn_fsm *self, int src, int type, void *srcptr)
         nn_fsm_stopped (&ep->fsm, NN_EP_STOPPED);
         return;
     }
+
+    nn_fsm_bad_state (ep->state, src, type);
+}
+
+
+static void nn_ep_handler (struct nn_fsm *self, int src, int type,
+    NN_UNUSED void *srcptr)
+{
+    struct nn_ep *ep;
+
+    ep = nn_cont (self, struct nn_ep, fsm);
 
     switch (ep->state) {
 
@@ -171,11 +180,11 @@ static void nn_ep_handler (struct nn_fsm *self, int src, int type, void *srcptr)
                 ep->state = NN_EP_STATE_ACTIVE;
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (ep->state, src, type);
             }
 
         default:
-            nn_assert (0);
+            nn_fsm_bad_source (ep->state, src, type);
         }
 
 /******************************************************************************/
@@ -184,13 +193,38 @@ static void nn_ep_handler (struct nn_fsm *self, int src, int type, void *srcptr)
 /*  is closing the endpoint.                                                  */
 /******************************************************************************/
     case NN_EP_STATE_ACTIVE:
-        nn_assert (0);
+        nn_fsm_bad_source (ep->state, src, type);
 
 /******************************************************************************/
 /*  Invalid state.                                                            */
 /******************************************************************************/
     default:
-        nn_assert (0);
+        nn_fsm_bad_state (ep->state, src, type);
     }
 }
 
+void nn_ep_set_error(struct nn_ep *self, int errnum)
+{
+    if (self->last_errno == errnum)
+        /*  Error is still there, no need to report it again  */
+        return;
+    if (self->last_errno == 0)
+        nn_sock_stat_increment (self->sock, NN_STAT_CURRENT_EP_ERRORS, 1);
+    self->last_errno = errnum;
+    nn_sock_report_error (self->sock, self, errnum);
+}
+
+void nn_ep_clear_error (struct nn_ep *self)
+{
+    if (self->last_errno == 0)
+        /*  Error is already clear, no need to report it  */
+        return;
+    nn_sock_stat_increment (self->sock, NN_STAT_CURRENT_EP_ERRORS, -1);
+    self->last_errno = 0;
+    nn_sock_report_error (self->sock, self, 0);
+}
+
+void nn_ep_stat_increment (struct nn_ep *self, int name, int increment)
+{
+    nn_sock_stat_increment (self->sock, name, increment);
+}

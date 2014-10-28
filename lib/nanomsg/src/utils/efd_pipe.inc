@@ -22,8 +22,9 @@
 
 #include "err.h"
 #include "fast.h"
+#include "int.h"
+#include "closefd.h"
 
-#include <stdint.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -55,9 +56,9 @@ int nn_efd_init (struct nn_efd *self)
 
 #if !defined NN_HAVE_PIPE2
     flags = fcntl (self->r, F_GETFL, 0);
-	if (flags == -1)
+    if (flags == -1)
         flags = 0;
-	rc = fcntl (self->r, F_SETFL, flags | O_NONBLOCK);
+    rc = fcntl (self->r, F_SETFL, flags | O_NONBLOCK);
     errno_assert (rc != -1);
 #endif
 
@@ -66,12 +67,8 @@ int nn_efd_init (struct nn_efd *self)
 
 void nn_efd_term (struct nn_efd *self)
 {
-    int rc;
-
-    rc = close (self->r);
-    errno_assert (rc == 0);
-    rc = close (self->w);
-    errno_assert (rc == 0);
+    nn_closefd (self->r);
+    nn_closefd (self->w);
 }
 
 nn_fd nn_efd_getfd (struct nn_efd *self)
@@ -99,7 +96,7 @@ void nn_efd_unsignal (struct nn_efd *self)
         if (nbytes < 0 && errno == EAGAIN)
             nbytes = 0;
         errno_assert (nbytes >= 0);
-        if (nn_fast (nbytes < sizeof (buf)))
+        if (nn_fast ((size_t) nbytes < sizeof (buf)))
             break;
     }
 }

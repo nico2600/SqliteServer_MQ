@@ -28,6 +28,7 @@
 #include "../../utils/cont.h"
 #include "../../utils/fast.h"
 #include "../../utils/wire.h"
+#include "../../utils/attr.h"
 
 #include <stddef.h>
 #include <string.h>
@@ -46,11 +47,14 @@
 /*  Private functions. */
 static void nn_streamhdr_handler (struct nn_fsm *self, int src, int type,
     void *srcptr);
+static void nn_streamhdr_shutdown (struct nn_fsm *self, int src, int type,
+    void *srcptr);
 
 void nn_streamhdr_init (struct nn_streamhdr *self, int src,
     struct nn_fsm *owner)
 {
-    nn_fsm_init (&self->fsm, nn_streamhdr_handler, src, self, owner);
+    nn_fsm_init (&self->fsm, nn_streamhdr_handler, nn_streamhdr_shutdown,
+        src, self, owner);
     self->state = NN_STREAMHDR_STATE_IDLE;
     nn_timer_init (&self->timer, NN_STREAMHDR_SRC_TIMER, &self->fsm);
     nn_fsm_event_init (&self->done);
@@ -63,7 +67,7 @@ void nn_streamhdr_init (struct nn_streamhdr *self, int src,
 
 void nn_streamhdr_term (struct nn_streamhdr *self)
 {
-    nn_assert (self->state == NN_STREAMHDR_STATE_IDLE);
+    nn_assert_state (self, NN_STREAMHDR_STATE_IDLE);
 
     nn_fsm_event_term (&self->done);
     nn_timer_term (&self->timer);
@@ -107,18 +111,13 @@ void nn_streamhdr_stop (struct nn_streamhdr *self)
     nn_fsm_stop (&self->fsm);
 }
 
-static void nn_streamhdr_handler (struct nn_fsm *self, int src, int type,
-    void *srcptr)
+static void nn_streamhdr_shutdown (struct nn_fsm *self, int src, int type,
+    NN_UNUSED void *srcptr)
 {
     struct nn_streamhdr *streamhdr;
-    struct nn_iovec iovec;
-    int protocol;
 
     streamhdr = nn_cont (self, struct nn_streamhdr, fsm);
 
-/******************************************************************************/
-/*  STOP procedure.                                                           */
-/******************************************************************************/
     if (nn_slow (src == NN_FSM_ACTION && type == NN_FSM_STOP)) {
         nn_timer_stop (&streamhdr->timer);
         streamhdr->state = NN_STREAMHDR_STATE_STOPPING;
@@ -130,6 +129,19 @@ static void nn_streamhdr_handler (struct nn_fsm *self, int src, int type,
         nn_fsm_stopped (&streamhdr->fsm, NN_STREAMHDR_STOPPED);
         return;
     }
+
+    nn_fsm_bad_state (streamhdr->state, src, type);
+}
+
+static void nn_streamhdr_handler (struct nn_fsm *self, int src, int type,
+    NN_UNUSED void *srcptr)
+{
+    struct nn_streamhdr *streamhdr;
+    struct nn_iovec iovec;
+    int protocol;
+
+    streamhdr = nn_cont (self, struct nn_streamhdr, fsm);
+
 
     switch (streamhdr->state) {
 
@@ -149,11 +161,11 @@ static void nn_streamhdr_handler (struct nn_fsm *self, int src, int type,
                 streamhdr->state = NN_STREAMHDR_STATE_SENDING;
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (streamhdr->state, src, type);
             }
 
         default:
-            nn_assert (0);
+            nn_fsm_bad_source (streamhdr->state, src, type);
         }
 
 /******************************************************************************/
@@ -169,12 +181,15 @@ static void nn_streamhdr_handler (struct nn_fsm *self, int src, int type,
                     sizeof (streamhdr->protohdr));
                 streamhdr->state = NN_STREAMHDR_STATE_RECEIVING;
                 return;
+            case NN_USOCK_SHUTDOWN:
+                /*  Ignore it. Wait for ERROR event  */
+                return;
             case NN_USOCK_ERROR:
                 nn_timer_stop (&streamhdr->timer);
                 streamhdr->state = NN_STREAMHDR_STATE_STOPPING_TIMER_ERROR;
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (streamhdr->state, src, type);
             }
 
         case NN_STREAMHDR_SRC_TIMER:
@@ -184,11 +199,11 @@ static void nn_streamhdr_handler (struct nn_fsm *self, int src, int type,
                 streamhdr->state = NN_STREAMHDR_STATE_STOPPING_TIMER_ERROR;
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (streamhdr->state, src, type);
             }
 
         default:
-            nn_assert (0);
+            nn_fsm_bad_source (streamhdr->state, src, type);
         }
 
 /******************************************************************************/
@@ -211,6 +226,9 @@ static void nn_streamhdr_handler (struct nn_fsm *self, int src, int type,
                 nn_timer_stop (&streamhdr->timer);
                 streamhdr->state = NN_STREAMHDR_STATE_STOPPING_TIMER_DONE;
                 return;
+            case NN_USOCK_SHUTDOWN:
+                /*  Ignore it. Wait for ERROR event  */
+                return;
             case NN_USOCK_ERROR:
 invalidhdr:
                 nn_timer_stop (&streamhdr->timer);
@@ -227,11 +245,11 @@ invalidhdr:
                 streamhdr->state = NN_STREAMHDR_STATE_STOPPING_TIMER_ERROR;
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (streamhdr->state, src, type);
             }
 
         default:
-            nn_assert (0);
+            nn_fsm_bad_source (streamhdr->state, src, type);
         }
 
 /******************************************************************************/
@@ -239,6 +257,10 @@ invalidhdr:
 /******************************************************************************/
     case NN_STREAMHDR_STATE_STOPPING_TIMER_ERROR:
         switch (src) {
+
+        case NN_STREAMHDR_SRC_USOCK:
+            /*  It's safe to ignore usock event when we are stopping  */
+            return;
 
         case NN_STREAMHDR_SRC_TIMER:
             switch (type) {
@@ -252,11 +274,11 @@ invalidhdr:
                     NN_STREAMHDR_ERROR);
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (streamhdr->state, src, type);
             }
 
-        default:    
-            nn_assert (0);
+        default:
+            nn_fsm_bad_source (streamhdr->state, src, type);
         }
 
 /******************************************************************************/
@@ -277,11 +299,11 @@ invalidhdr:
                     NN_STREAMHDR_OK);
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (streamhdr->state, src, type);
             }
 
-        default:       
-            nn_assert (0);
+        default:
+            nn_fsm_bad_source (streamhdr->state, src, type);
         }
 
 /******************************************************************************/
@@ -290,14 +312,13 @@ invalidhdr:
 /*  nothing that can be done in this state except stopping the object.        */
 /******************************************************************************/
     case NN_STREAMHDR_STATE_DONE:
-        nn_assert (0);
+        nn_fsm_bad_source (streamhdr->state, src, type);
 
 /******************************************************************************/
 /*  Invalid state.                                                            */
 /******************************************************************************/
     default:
-        nn_assert (0);
+        nn_fsm_bad_state (streamhdr->state, src, type);
     }
 }
-
 

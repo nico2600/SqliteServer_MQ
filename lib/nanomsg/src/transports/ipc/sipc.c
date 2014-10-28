@@ -20,16 +20,14 @@
     IN THE SOFTWARE.
 */
 
-#if !defined NN_HAVE_WINDOWS
-
 #include "sipc.h"
 
 #include "../../utils/err.h"
 #include "../../utils/cont.h"
 #include "../../utils/fast.h"
 #include "../../utils/wire.h"
-
-#include <stdint.h>
+#include "../../utils/int.h"
+#include "../../utils/attr.h"
 
 /*  Types of messages passed via IPC transport. */
 #define NN_SIPC_MSG_NORMAL 1
@@ -40,8 +38,9 @@
 #define NN_SIPC_STATE_PROTOHDR 2
 #define NN_SIPC_STATE_STOPPING_STREAMHDR 3
 #define NN_SIPC_STATE_ACTIVE 4
-#define NN_SIPC_STATE_DONE 5
-#define NN_SIPC_STATE_STOPPING 6
+#define NN_SIPC_STATE_SHUTTING_DOWN 5
+#define NN_SIPC_STATE_DONE 6
+#define NN_SIPC_STATE_STOPPING 7
 
 /*  Subordinated srcptr objects. */
 #define NN_SIPC_SRC_USOCK 1
@@ -67,11 +66,14 @@ const struct nn_pipebase_vfptr nn_sipc_pipebase_vfptr = {
 /*  Private functions. */
 static void nn_sipc_handler (struct nn_fsm *self, int src, int type,
     void *srcptr);
+static void nn_sipc_shutdown (struct nn_fsm *self, int src, int type,
+    void *srcptr);
 
 void nn_sipc_init (struct nn_sipc *self, int src,
     struct nn_epbase *epbase, struct nn_fsm *owner)
 {
-    nn_fsm_init (&self->fsm, nn_sipc_handler, src, self, owner);
+    nn_fsm_init (&self->fsm, nn_sipc_handler, nn_sipc_shutdown,
+        src, self, owner);
     self->state = NN_SIPC_STATE_IDLE;
     nn_streamhdr_init (&self->streamhdr, NN_SIPC_SRC_STREAMHDR, &self->fsm);
     self->usock = NULL;
@@ -87,7 +89,7 @@ void nn_sipc_init (struct nn_sipc *self, int src,
 
 void nn_sipc_term (struct nn_sipc *self)
 {
-    nn_assert (self->state == NN_SIPC_STATE_IDLE);
+    nn_assert_state (self, NN_SIPC_STATE_IDLE);
 
     nn_fsm_event_term (&self->done);
     nn_msg_term (&self->outmsg);
@@ -127,7 +129,7 @@ static int nn_sipc_send (struct nn_pipebase *self, struct nn_msg *msg)
 
     sipc = nn_cont (self, struct nn_sipc, pipebase);
 
-    nn_assert (sipc->state == NN_SIPC_STATE_ACTIVE);
+    nn_assert_state (sipc, NN_SIPC_STATE_ACTIVE);
     nn_assert (sipc->outstate == NN_SIPC_OUTSTATE_IDLE);
 
     /*  Move the message to the local storage. */
@@ -159,7 +161,7 @@ static int nn_sipc_recv (struct nn_pipebase *self, struct nn_msg *msg)
 
     sipc = nn_cont (self, struct nn_sipc, pipebase);
 
-    nn_assert (sipc->state == NN_SIPC_STATE_ACTIVE);
+    nn_assert_state (sipc, NN_SIPC_STATE_ACTIVE);
     nn_assert (sipc->instate == NN_SIPC_INSTATE_HASMSG);
 
     /*  Move received message to the user. */
@@ -173,18 +175,13 @@ static int nn_sipc_recv (struct nn_pipebase *self, struct nn_msg *msg)
     return 0;
 }
 
-static void nn_sipc_handler (struct nn_fsm *self, int src, int type,
-    void *srcptr)
+static void nn_sipc_shutdown (struct nn_fsm *self, int src, int type,
+    NN_UNUSED void *srcptr)
 {
-    int rc;
     struct nn_sipc *sipc;
-    uint64_t size;
 
     sipc = nn_cont (self, struct nn_sipc, fsm);
 
-/******************************************************************************/
-/*  STOP procedure.                                                           */
-/******************************************************************************/
     if (nn_slow (src == NN_FSM_ACTION && type == NN_FSM_STOP)) {
         nn_pipebase_stop (&sipc->pipebase);
         nn_streamhdr_stop (&sipc->streamhdr);
@@ -203,13 +200,28 @@ static void nn_sipc_handler (struct nn_fsm *self, int src, int type,
         return;
     }
 
+    nn_fsm_bad_state(sipc->state, src, type);
+}
+
+static void nn_sipc_handler (struct nn_fsm *self, int src, int type,
+    NN_UNUSED void *srcptr)
+{
+    int rc;
+    struct nn_sipc *sipc;
+    uint64_t size;
+
+    sipc = nn_cont (self, struct nn_sipc, fsm);
+
+
     switch (sipc->state) {
 
 /******************************************************************************/
 /*  IDLE state.                                                               */
 /******************************************************************************/
     case NN_SIPC_STATE_IDLE:
-        if (src == NN_FSM_ACTION) {
+        switch (src) {
+
+        case NN_FSM_ACTION:
             switch (type) {
             case NN_FSM_START:
                 nn_streamhdr_start (&sipc->streamhdr, sipc->usock,
@@ -217,10 +229,12 @@ static void nn_sipc_handler (struct nn_fsm *self, int src, int type,
                 sipc->state = NN_SIPC_STATE_PROTOHDR;
                 return;
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (sipc->state, src, type);
             }
+
+        default:
+            nn_fsm_bad_source (sipc->state, src, type);
         }
-        nn_assert (0);
 
 /******************************************************************************/
 /*  PROTOHDR state.                                                           */
@@ -247,11 +261,11 @@ static void nn_sipc_handler (struct nn_fsm *self, int src, int type,
                 return;
 
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (sipc->state, src, type);
             }
 
         default:
-            nn_assert (0);
+            nn_fsm_bad_source (sipc->state, src, type);
         }
 
 /******************************************************************************/
@@ -266,8 +280,12 @@ static void nn_sipc_handler (struct nn_fsm *self, int src, int type,
 
                  /*  Start the pipe. */
                  rc = nn_pipebase_start (&sipc->pipebase);
-                 errnum_assert (rc == 0, -rc);
-                 
+                 if (nn_slow (rc < 0)) {
+                    sipc->state = NN_SIPC_STATE_DONE;
+                    nn_fsm_raise (&sipc->fsm, &sipc->done, NN_SIPC_ERROR);
+                    return;
+                 }
+
                  /*  Start receiving a message in asynchronous manner. */
                  sipc->instate = NN_SIPC_INSTATE_HDR;
                  nn_usock_recv (sipc->usock, &sipc->inhdr,
@@ -280,11 +298,11 @@ static void nn_sipc_handler (struct nn_fsm *self, int src, int type,
                  return;
 
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (sipc->state, src, type);
             }
 
         default:
-            nn_assert (0);
+            nn_fsm_bad_source (sipc->state, src, type);
         }
 
 /******************************************************************************/
@@ -344,18 +362,46 @@ static void nn_sipc_handler (struct nn_fsm *self, int src, int type,
                     nn_assert (0);
                 }
 
+            case NN_USOCK_SHUTDOWN:
+                nn_pipebase_stop (&sipc->pipebase);
+                sipc->state = NN_SIPC_STATE_SHUTTING_DOWN;
+                return;
+
             case NN_USOCK_ERROR:
                 nn_pipebase_stop (&sipc->pipebase);
                 sipc->state = NN_SIPC_STATE_DONE;
                 nn_fsm_raise (&sipc->fsm, &sipc->done, NN_SIPC_ERROR);
                 return;
 
+
             default:
-                nn_assert (0);
+                nn_fsm_bad_action (sipc->state, src, type);
             }
 
         default:
-            nn_assert (0);
+            nn_fsm_bad_source (sipc->state, src, type);
+        }
+
+/******************************************************************************/
+/*  SHUTTING_DOWN state.                                                      */
+/*  The underlying connection is closed. We are just waiting that underlying  */
+/*  usock being closed                                                        */
+/******************************************************************************/
+    case NN_SIPC_STATE_SHUTTING_DOWN:
+        switch (src) {
+
+        case NN_SIPC_SRC_USOCK:
+            switch (type) {
+            case NN_USOCK_ERROR:
+                sipc->state = NN_SIPC_STATE_DONE;
+                nn_fsm_raise (&sipc->fsm, &sipc->done, NN_SIPC_ERROR);
+                return;
+            default:
+                nn_fsm_bad_action (sipc->state, src, type);
+            }
+
+        default:
+            nn_fsm_bad_source (sipc->state, src, type);
         }
 
 /******************************************************************************/
@@ -364,15 +410,13 @@ static void nn_sipc_handler (struct nn_fsm *self, int src, int type,
 /*  this state except stopping the object.                                    */
 /******************************************************************************/
     case NN_SIPC_STATE_DONE:
-        nn_assert (0);
+        nn_fsm_bad_source (sipc->state, src, type);
+
 
 /******************************************************************************/
 /*  Invalid state.                                                            */
 /******************************************************************************/
     default:
-        nn_assert (0);
+        nn_fsm_bad_state (sipc->state, src, type);
     }
 }
-
-#endif
-
