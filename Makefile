@@ -8,7 +8,7 @@ clean:
 	cd src; make clean
 
 lib:
-	cd lib/nanomsg; ./autogen; ./configure; make install
+	cd lib/nanomsg; ./autogen.sh; ./configure; make install
 
 src:
 	cd src; make
