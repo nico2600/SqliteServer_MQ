@@ -14,7 +14,7 @@ SRC	=	main.c			\
 # ###################################################################
 
 # Paths to header files
-IPATH	= -I. -I../include
+IPATH	= -I. -I../include -I../lib/nanomsg/.libs/
 # Path to libraries and lib's names
 LDPATH	= -L. -L../lib -lpthread -lnanomsg -lrt -lsqlite3 -Wl,-rpath -Wl,'$$ORIGIN/../lib'
 # Compiler options
