@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/nico2600/SqliteServer_MQ.svg)](https://travis-ci.org/nico2600/SqliteServer_MQ)
+
 SqliteServer_MQ
 ===============
 
